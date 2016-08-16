@@ -8,26 +8,24 @@ import numpy as np
 import cPickle, gzip
 import os
 
-from tf.nn.rnn_cell import LSTMCell, DropoutWrapper
-
 class DRAW(object) :
 	# class that creates DRAW tensorflow computation graph, and train / perform basic experiments
 	# Model : DRAW : A Recurrent Neural Network For Image Generation, arXiv : 1502.04623 [cs.CV], May 2015
 	# Experiment Data : binarized MNIST
 
-	## helper functions
-
-	def single_linear(shape, input_tensor, scope_name="linear") :
+	def single_linear(self, shape, input_tensor, time, scope_name="linear") :
 		# generates single linear transformation layer
 		# parameter : 
 		#	shape : shape of W. [input_dim, output_dim]
 		# 	input_tensor : input tensor, should be [None, input_dim]
+		#	time : current timestamp. to determine to reuse variable or not.
 		#	scope_name : optional. name of the variable scope.
 
 		thres = np.sqrt(6.0 / (shape[0] + shape[1]))
 		with tf.variable_scope(scope_name) :
-			weights = tf.Variable(tf.random_uniform(shape, minval=-thres, maxval=thres), name="weights")
-			biases = tf.Variable(tf.zeros([shape[1]]), name="biases")
+			if time > 1 : tf.get_variable_scope().reuse_variables()
+			weights = tf.get_variable("weights", shape, initializer = tf.random_uniform_initializer(minval=-thres, maxval=thres))
+			biases = tf.get_variable("biases", [shape[1]], initializer = tf.constant_initializer(0.0))
 		return tf.matmul(input_tensor, weights)+biases
 
 	def read_layer(self, x, time, attention = False) :
@@ -79,12 +77,12 @@ class DRAW(object) :
 
 		if attention : 
 			# TODO : implement
-			return single_linear([self.dec_lstm, self.input_dim], input_tensor, scope_name="write")
+			return self.single_linear([self.dec_size, self.input_dim], input_tensor, time, scope_name="write")
 		else : 
-			return single_linear([self.dec_lstm, self.input_dim], input_tensor, scope_name="write")
+			return self.single_linear([self.dec_size, self.input_dim], input_tensor, time, scope_name="write")
 
-	def step_path(path) :
-		return 'saved_step'+str(hash(model_path)%172062407)
+	def step_path(self, path) :
+		return 'saved_step_'+str(abs(hash(path)%172062407))
 
 	def __init__(self, image_shape, is_training = True, model_path=None) :
 		# parameter :
@@ -100,7 +98,7 @@ class DRAW(object) :
 		self.is_training = is_training
 
 		# model parameters
-		self.mini_batch_size = 64
+		self.mini_batch_size = 256
 		self.max_time = 10 # max time sequence, T
 		self.keep_prob = 0.5 # keep probability for dropout
 		self.enc_size = 300
@@ -108,7 +106,7 @@ class DRAW(object) :
 		self.image_shape = image_shape # (height, width, channel)
 		self.batch_image_shape = [self.mini_batch_size] + list(image_shape)
 		self.input_dim = image_shape[0] * image_shape[1] * image_shape[2]
-		self.latent_dim = 30 # dimension for latent vector (z)
+		self.latent_dim = 10 # dimension for latent vector (z)
 		self.attention = False
 		self.learning_rate = 0.003
 		self.model_path = model_path
@@ -117,14 +115,14 @@ class DRAW(object) :
 		self.canvas_0 = tf.Variable(tf.random_normal(self.image_shape), name="canvas_0")
 		self.h_enc_0 = tf.Variable(tf.random_normal([self.enc_size]), name="h_enc_0")
 		self.h_dec_0 = tf.Variable(tf.random_normal([self.dec_size]), name="h_dec_0")
-		self.canvas_list = [tf.tile(self.canvas_0, [self.mini_batch_size, 1, 1, 1])] + ([None]*(self.max_time))
-		self.h_enc_list = [tf.tile(self.h_enc_0, [self.mini_batch_size, 1])] + ([None]*(self.max_time))
-		self.h_dec_list = [tf.tile(self.h_dec_0, [self.mini_batch_size, 1])] + ([None]*(self.max_time))
-		self.enc_lstm = LSTMCell(self.enc_size, name="encoder_lstm")
-		self.dec_lstm = LSTMCell(self.dec_size, name="decoder_lstm")
-		self.enc_lstm_state = self.enc_lstm.zero_state(self.mini_batch_size)
-		self.dec_lstm_state = self.dec_lstm.zero_state(self.mini_batch_size)
-		if is_training : (self.enc_lstm, self.dec_lstm) = tuple([DropoutWrapper(x, output_keep_prob = self.keep_prob) for x in [self.enc_lstm, self.dec_lstm]])
+		self.canvas_list = [tf.tile(tf.reshape(self.canvas_0, [1]+self.image_shape), [self.mini_batch_size, 1, 1, 1])] + ([None]*(self.max_time))
+		self.h_enc_list = [tf.tile(tf.reshape(self.h_enc_0, [1, self.enc_size]), [self.mini_batch_size, 1])] + ([None]*(self.max_time))
+		self.h_dec_list = [tf.tile(tf.reshape(self.h_dec_0, [1, self.dec_size]), [self.mini_batch_size, 1])] + ([None]*(self.max_time))
+		self.enc_lstm = tf.nn.rnn_cell.LSTMCell(self.enc_size)
+		self.dec_lstm = tf.nn.rnn_cell.LSTMCell(self.dec_size)
+		self.enc_lstm_state = self.enc_lstm.zero_state(self.mini_batch_size, tf.float32)
+		self.dec_lstm_state = self.dec_lstm.zero_state(self.mini_batch_size, tf.float32)
+		if is_training : (self.enc_lstm, self.dec_lstm) = tuple([tf.nn.rnn_cell.DropoutWrapper(x, output_keep_prob = self.keep_prob) for x in [self.enc_lstm, self.dec_lstm]])
 
 		# build network
 		self.x_input = tf.placeholder(tf.float32, shape=self.batch_image_shape)
@@ -137,45 +135,46 @@ class DRAW(object) :
 		for time in xrange(1, self.max_time+1) :
 			
 			with tf.name_scope('encoding') :
-				read_out = self.read_layer(x_input, time)
+				read_out = self.read_layer(self.x_input, time)
 				enc_out = self.h_enc_list[time] = self.encoder(read_out, time)
 			
 			with tf.name_scope('sample') :
 				# sample : just sample one example for DRAW Network
 				if is_training : # while training, geenerate z_mu and z_sigma from the output of encoder, and sample one z
-					z_mu = single_linear([self.enc_size, self.latent_dim], enc_out, scope_name="z_mu")
-					z_sigma = tf.exp(single_linear([self.enc_size, self.latent_dim], enc_out, scope_name="z_sigma"))
+					z_mu = self.single_linear([self.enc_size, self.latent_dim], enc_out, time, scope_name="z_mu")
+					z_sigma = tf.exp(self.single_linear([self.enc_size, self.latent_dim], enc_out, time, scope_name="z_sigma"))
 				else : # while test, just generate z by normal distribution ~ N(0, 1).	
 					z_mu = tf.zeros([self.mini_batch_size, self.latent_dim])
 					z_sigma = tf.ones([self.mini_batch_size, self.latent_dim])
-				sample_out = z_mu + tf.mul(z_sigma, z_noise)
+				sample_out = z_mu + tf.mul(z_sigma, noise)
 
 				# accumulate squares for future loss calculation
-				mu_square_accum += tf.reduce_sum(tf.reduce_mean(tf.square(z_mu), 1))
+				mu_square_accum += tf.reduce_mean(tf.reduce_sum(tf.square(z_mu), 1))
 				sigma_square = tf.square(z_sigma)
-				sigma_square_accum += tf.reduce_sum(tf.reduce_mean(sigma_square, 1))
-				log_sigma_square_accum += tf.reduce_sum(tf.reduce_mean(tf.log(sigma_square), 1))
+				sigma_square_accum += tf.reduce_mean(tf.reduce_sum(sigma_square, 1))
+				log_sigma_square_accum += tf.reduce_mean(tf.reduce_sum(tf.log(sigma_square), 1))
 
 			with tf.name_scope('decoding') :
 				dec_out = self.h_dec_list[time] = self.decoder(sample_out, time)
-				write_out = self.write(dec_out, time)
+				write_out = self.write_layer(dec_out, time)
 				self.canvas_list[time] = self.canvas_list[time-1] + tf.reshape(write_out, self.batch_image_shape)
 
 		# results, losses and optimizer
 		with tf.name_scope('results') :
 			self.final_image = tf.nn.sigmoid(self.canvas_list[self.max_time])
-			self.loss_x = tf.nn.sigmoid_cross_entropy_with_logits(self.canvas_list[self.max_time], x_input, name="loss_x")
-			self.loss_z = 0.5 * (mu_square_accum + sigma_square_accum - log_sigma_suqare_accum - self.max_time)
-			self.total_loss = loss_x + loss_z
-			self.optimizer = tf.train.AdamOptimizer(learning_rate=self.learning_rate).minimize(total_loss)
+			cross_entropy = tf.reshape(tf.nn.sigmoid_cross_entropy_with_logits(self.canvas_list[self.max_time], self.x_input, name="loss_x"), [self.mini_batch_size, self.input_dim])
+			self.loss_x = tf.reduce_mean(tf.reduce_sum(cross_entropy, 1))
+			self.loss_z = 0.5 * (mu_square_accum + sigma_square_accum - log_sigma_square_accum - self.max_time)
+			self.total_loss = self.loss_x + self.loss_z
+			self.optimizer = tf.train.AdamOptimizer(learning_rate=self.learning_rate).minimize(self.total_loss)
 
 		# summary writer, write just if training
 		if is_training :
 			with tf.name_scope('summary') :
-				tf.scalar_summary('loss_x', loss_x)
-				tf.scalar_summary('loss_z', loss_z)
-				tf.scalar_summary('total_loss', total_loss)
-				tf.histogram_summary('final_image', final_image)
+				tf.scalar_summary('loss_x', self.loss_x)
+				tf.scalar_summary('loss_z', self.loss_z)
+				tf.scalar_summary('total_loss', self.total_loss)
+				tf.histogram_summary('final_image', self.final_image)
 				self.merged_summary = tf.merge_all_summaries()
 
 		# if class is instantiated for image generation, try to load model here
@@ -188,7 +187,9 @@ class DRAW(object) :
 		# helper function to load model
 
 		model_restore_success = False
-		if self.model_path is not None :
+		if (self.model_path is not None or self.is_training is False) :
+			if not self.is_training : model_path = "/model/model.ckpt" # default path
+			else : model_path = self.model_path
 			try :
 				saver.restore(sess, model_path)
 				model_restore_success = True
@@ -219,8 +220,8 @@ class DRAW(object) :
 		else : my_path = self.model_path
 
 		saver.save(sess, my_path)
-		with open(step_path(my_path), 'wb') as f :
-			cPickle.dump(step)
+		with open(self.step_path(my_path), 'wb') as f :
+			cPickle.dump(step, f)
 
 	def train(self, train_data, valid_data, max_epoch = 60) :
 		# train the model by given train data & valid data.
@@ -231,7 +232,7 @@ class DRAW(object) :
 		#	max_epoch : optional. changes the max epoch of training session
 
 		assert (self.is_training), "To train, class should be created with 'is_training = True'!"
-		assert (train_data.shape[1:] == valid_data.shape[1:] == self.image_shape), "The shape of train data & validation data should be equal with 'image_shape'!"
+		assert (train_data.shape[1:] == valid_data.shape[1:] == tuple(self.image_shape)), "The shape of train data & validation data should be equal with 'image_shape'!"
 
 		step = 0
 
@@ -241,9 +242,11 @@ class DRAW(object) :
 			self.load_model(saver, sess)
 
 			for epoch in xrange(1, max_epoch+1) :
+				print epoch
 				# train
 				np.random.shuffle(train_data)
 				for i in xrange(0, train_data.shape[0], self.mini_batch_size) :
+					if i+self.mini_batch_size > train_data.shape[0] : break 
 					current_input = train_data[i:i+self.mini_batch_size]
 					_, summary = sess.run([self.optimizer, self.merged_summary], feed_dict = {self.x_input : current_input})
 					summary_writer.add_summary(summary, step)
@@ -252,7 +255,8 @@ class DRAW(object) :
 				# validation, per 5 epoch
 				if epoch % 5 == 0 :
 					lx_sum = lz_sum = l_sum = count = 0.0
-					for i in xrange(0, val_data.shape[0], self.mini_batch_size) :
+					for i in xrange(0, valid_data.shape[0], self.mini_batch_size) :
+						if i + self.mini_batch_size > valid_data.shape[0] : break
 						current_input = valid_data[i:i+self.mini_batch_size]
 						lx_val, lz_val, l_val = sess.run([self.loss_x, self.loss_z, self.total_loss], feed_dict = {self.x_input : current_input})
 						lx_sum += lx_val; lz_sum += lz_val; l_sum += l_val
@@ -273,12 +277,13 @@ class DRAW(object) :
 
 	def generate(self) :
 		# returns mini batch of randomly generated images
-		return self.sess.run([self.final_image])
+		return self.sess.run([self.final_image])[0]
 
 def binarize(load_results) :
 	return tuple((np.where(d_x>0.5, 1.0, 0.0), d_y) for (d_x, d_y) in load_results)
 
 if __name__ == "__main__" :
+	'''
 	mnist_data_path = "mnist.pkl.gz"
 	with gzip.open(mnist_data_path, "rb") as f :
 		train_set, valid_set, _temp = binarize(cPickle.load(f))	# binarized MNIST
@@ -288,4 +293,9 @@ if __name__ == "__main__" :
 		valid_set = np.reshape(valid_set, [valid_set.shape[0], 28, 28, 1])
 
 	my_DRAW = DRAW(image_shape=[28, 28, 1], is_training=True)
-	my_DRAW.train()
+	my_DRAW.train(train_set, valid_set, max_epoch = 20)
+	'''
+	my_DRAW = DRAW(image_shape=[28, 28, 1], is_training=False)
+	generated_images = my_DRAW.generate()
+	with open('generated_images.npy', 'wb') as f:
+		cPickle.dump(generated_images, f)
