@@ -19,7 +19,7 @@ Both models are trained with binarized MNIST data, for 100 epochs.
 | With Attention | Without Attention |
 | ------------- | ------------- |
 | <img src="http://i.imgur.com/dG9tRlQ.gif" width="100%"> | <img src="http://i.imgur.com/hGvr8vj.gif" width="100%"> |
-Red squares in 'With Attention` is a visualization of the attention area (gaussian patch). The position and size of the square corresponds to the position and size of the attention area, and the line width corresponds to the variance of the gaussian filter.
+Red squares in 'With Attention' is a visualization of the attention area (gaussian patch). The position and size of the square corresponds to the position and size of the attention area, and the line width corresponds to the variance of the gaussian filter.
 
 
 ## Usage
@@ -33,9 +33,9 @@ trained_DRAW_model = DRAW(image_shape=[28, 28, 1], is_training = False, model_pa
 generated_images = trained_DRAW_model.generate()
 ```
  First, you need to train the model, by using a ``train()`` method on the DRAW object with the ``is_training`` parameter ``True``. While training, the weight of the model will be stored at model_path periodically. To generate the image, you should make the DRAW object with the parameter``is_training == False``, and the same model path that you used in the trained model.
- **Caution : ** while generating the trained DRAW model, parameters used at the previous model initialization except ``is_training`` should be same. Different parameters might invoke different model structure from the trained model structure, and can make some unexpected errors / results. This implementation does not assure or check if the parameters are same.
+ ** Caution : ** while generating the trained DRAW model, parameters used at the previous model initialization except ``is_training`` should be same. Different parameters might invoke different model structure from the trained model structure, and can make some unexpected errors / results. This implementation does not assure or check if the parameters are same.
 
-#### DRAW.__init__(image_shape, is_training, model_path = None, attention = True, max_time = 10, filter_size = 5, batch_size = 256, hidden_dim = 300, latent_dim = 10)
+#### DRAW.\_\_init__(image_shape, is_training, model_path = None, attention = True, max_time = 10, filter_size = 5, batch_size = 256, hidden_dim = 300, latent_dim = 10)
  Initializes new DRAW object.
 - image_shape : Tuple/list that indicates the shape of the image, [height, width, channel]
 	- for MNIST, [28, 28, 1]
@@ -72,3 +72,6 @@ Returns generated images & filters, through time.
 	- (images, filters)
 	- images : Numpy array of [time, batch, image_height, image_width, channel], where time : 0 to ``max_time``
 	- filters : List of gaussian filter attributes through time, (g_x, g_y, delta, sigma_square), where time : **1** to ``max_time``
+
+## Issues
+- Tested on tensorflow r0.8 : may not support higher versions
