@@ -2,9 +2,9 @@
 
 This repo contains a tensorflow implementation of the paper [DRAW : A Recurrent Neural Network For Image Generation](http://arxiv.org/abs/1502.04623), a generative network for image generation, with variational autoencoder(VAE) and LSTM structures.
 This implementation of DRAW network
-1. Supports multi-channel images as an input, including grayscale images & RGB images.
-2. Includes simple image generation code for grayscale images(ex, MNIST). (``image_generation.py``)
-3. Can be easily used & imported in other applications, since it is built as a class.
+- Supports multi-channel images as an input, including grayscale images & RGB images.
+- Includes simple image generation code for grayscale images(ex, MNIST). (``image_generation.py``)
+- Can be easily used & imported in other applications, since it is built as a class.
 
 ## Sample Results
 
@@ -12,6 +12,8 @@ This implementation of DRAW network
 | With Attention | Without Attention |
 | ------------- | ------------- |
 | <img src="http://i.imgur.com/w34llFR.png" width="100%"> | <img src="http://i.imgur.com/X3EpWPC.png" width="100%"> |
+Both models are trained with binarized MNIST data, for 100 epochs.
+
 
 #### Generation Process
 | With Attention | Without Attention |
